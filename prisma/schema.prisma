@@ -1,0 +1,155 @@
+// AI Accounts Receivable & Collections Agent — data model
+// SQLite for local dev via a driver adapter (Prisma 7 requires one explicitly).
+// No native enum on sqlite, so status/type fields are String, validated at
+// the application layer — see src/lib/enums.ts.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Customer {
+  id               String   @id @default(cuid())
+  companyName      String
+  contactName      String
+  contactEmail     String
+  paymentTermsDays Int      @default(30)
+  createdAt        DateTime @default(now())
+
+  // Deterministic risk rollup, recomputed after every reply / reminder run.
+  riskScore       Int?
+  riskLabel       String? // "low" | "medium" | "high"
+  riskExplanation String?
+  riskUpdatedAt   DateTime?
+
+  invoices    Invoice[]
+  riskFactors RiskFactor[]
+
+  @@index([riskScore])
+}
+
+model Invoice {
+  id            String   @id @default(cuid())
+  customerId    String
+  customer      Customer @relation(fields: [customerId], references: [id])
+
+  invoiceNumber String
+  description   String
+  amountCents   Int
+  issueDate     DateTime
+  dueDate       DateTime
+  status        String   @default("open") // "open" | "paid" | "disputed" | "written_off"
+  paidAt        DateTime? // when it actually got marked paid — feeds the cash forecast's "average days late" calc
+
+  anomalyFlag   Boolean  @default(false)
+  anomalyReason String?
+
+  createdAt DateTime @default(now())
+
+  reminderSteps   ReminderStep[]
+  replies         CustomerReply[]
+  disputes        Dispute[]
+  promisesToPay   PromiseToPay[]
+  paymentSessions PaymentSession[]
+
+  @@index([customerId])
+  @@index([status])
+}
+
+model ReminderStep {
+  id        String  @id @default(cuid())
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id])
+
+  stage        String   // "upcoming" | "overdue_1" | "overdue_2" | "overdue_3" | "final_notice"
+  scheduledFor DateTime
+  status       String   @default("pending") // "pending" | "drafted" | "sent_log_only" | "paused"
+  subject      String?
+  body         String?
+  sentAt       DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([invoiceId])
+  @@index([status])
+}
+
+model CustomerReply {
+  id             String   @id @default(cuid())
+  invoiceId      String
+  invoice        Invoice  @relation(fields: [invoiceId], references: [id])
+
+  rawText        String
+  classification String   // see enums.ts REPLY_CLASSIFICATIONS
+  createdAt      DateTime @default(now())
+
+  disputes      Dispute[]
+  promisesToPay PromiseToPay[]
+
+  @@index([invoiceId])
+}
+
+model Dispute {
+  id       String  @id @default(cuid())
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id])
+  replyId   String?
+  reply     CustomerReply? @relation(fields: [replyId], references: [id])
+
+  description    String
+  status         String   @default("open") // "open" | "resolved"
+  resolutionNote String?
+  resolvedAt     DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([invoiceId])
+  @@index([status])
+}
+
+model PromiseToPay {
+  id       String  @id @default(cuid())
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id])
+  replyId   String?
+  reply     CustomerReply? @relation(fields: [replyId], references: [id])
+
+  promisedDate        DateTime
+  promisedAmountCents Int?
+  status              String   @default("pending") // "pending" | "kept" | "broken"
+
+  createdAt DateTime @default(now())
+
+  @@index([invoiceId])
+}
+
+model RiskFactor {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+
+  label  String
+  points Int
+
+  createdAt DateTime @default(now())
+
+  @@index([customerId])
+}
+
+model PaymentSession {
+  id        String  @id @default(cuid())
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id])
+
+  provider   String // "stripe" | "log_only"
+  externalId String?
+  url        String
+
+  createdAt DateTime @default(now())
+
+  @@index([invoiceId])
+}
