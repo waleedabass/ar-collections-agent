@@ -1,13 +1,17 @@
 import "dotenv/config";
 import { PrismaClient } from "../src/generated/prisma/client";
-import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
+import { PrismaLibSql } from "@prisma/adapter-libsql";
 import { getReminderDraftProvider } from "../src/lib/reminders";
 import { formatMoney } from "../src/lib/format";
 import { recomputeCustomerRisk } from "../src/lib/risk/recompute";
 import type { ReminderStage } from "../src/lib/enums";
 
-const sqliteUrl = (process.env.DATABASE_URL ?? "file:./dev.db").replace(/^file:/, "");
-const db = new PrismaClient({ adapter: new PrismaBetterSqlite3({ url: sqliteUrl }) });
+const db = new PrismaClient({
+  adapter: new PrismaLibSql({
+    url: process.env.DATABASE_URL ?? "file:./dev.db",
+    authToken: process.env.DATABASE_AUTH_TOKEN,
+  }),
+});
 
 // Finds every ReminderStep whose scheduled date has arrived on a still-open
 // invoice, and drafts the email for it. Nothing here sends anything — a
